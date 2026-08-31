@@ -263,12 +263,39 @@ async function registerGlobalCommands(client, clientId, commands, totalSubcomman
     logger.info('Global commands may take up to an hour to appear in all servers on first deploy');
 }
 
+async function registerGuildCommands(client, clientId, guildId, commands) {
+    if (!clientId || !guildId) return;
+
+    if (!client.rest) {
+        throw new Error('Discord REST client is not available for guild command registration');
+    }
+
+    const commandsToRegister = prepareCommandsForRegistration(commands);
+
+    try {
+        logger.info(`Registering ${commandsToRegister.length} commands to guild ${guildId} (instant)...`);
+        await client.rest.put(`/applications/${clientId}/guilds/${guildId}/commands`, { body: commandsToRegister });
+        logger.info(`Successfully registered ${commandsToRegister.length} guild commands (available immediately in guild ${guildId})`);
+    } catch (error) {
+        // Guild registration is a best-effort optimization for instant availability;
+        // global registration is the source of truth, so don't fail the whole boot here.
+        logger.warn(`Guild command registration for ${guildId} failed (global registration still applies): ${error.message}`);
+    }
+}
+
 export async function registerCommands(client, options = {}) {
     const { clientId = null } = options;
+    const guildId = botConfig.commands?.testGuildId || process.env.GUILD_ID || null;
 
     try {
         const { commands, totalSubcommands } = collectCommandPayloads(client);
         await registerGlobalCommands(client, clientId, commands, totalSubcommands);
+
+        if (guildId) {
+            await registerGuildCommands(client, clientId, guildId, commands);
+        } else {
+            logger.info('No GUILD_ID set — skipping instant guild command registration (global only).');
+        }
     } catch (error) {
         logger.error('Error registering commands:', error);
         throw error;
